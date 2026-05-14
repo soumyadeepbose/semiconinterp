@@ -45,7 +45,7 @@ class ForwardWrapper(torch.nn.Module):
     def forward(self, x_raw):
         # Apply PCA inside PyTorch graph
         x_std = (x_raw - self.model.feature_mean) / self.model.feature_std
-        x_pca_unnorm = x_std @ self.model.V_pca + self.model.mu_pca
+        x_pca_unnorm = x_std @ self.model.V_pca.T + self.model.mu_pca
         x_pca = (x_pca_unnorm - self.model.score_mean) / self.model.score_std
 
         if self.model_type == "piae":
