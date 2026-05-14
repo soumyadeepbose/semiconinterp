@@ -17,7 +17,7 @@ Modes:
   piae   : Train Physics-Informed Autoencoder
   cvae   : Train Physics-Supervised Conditional VAE
   interp : Run interpretability methods on a trained model
-  all    : Run data, then piae, then cvae
+  all    : Run data, then piae, then cvae, then interp for both models
 """
 
 import os
@@ -96,27 +96,41 @@ def main():
             lr=args.lr
         )
 
-    if args.mode == 'interp':
-        print("\n" + "="*50)
-        print(f"🚀 STAGE 4: INTERPRETABILITY ({args.model_type.upper()})")
-        print("="*50)
-        if not args.model_path:
-            # Default fallback paths
-            if args.model_type == 'piae':
-                args.model_path = "outputs/checkpoints/piae_v3_s21_final.pt"
-            else:
-                args.model_path = "outputs/checkpoints/cvae_v5_physics_supervised_final.pt"
-            print(f"No --model-path provided, defaulting to: {args.model_path}")
+    if args.mode in ['interp', 'all']:
+        # When called explicitly, use provided args; when called from 'all', run both models
+        interp_jobs = []
+        if args.mode == 'all':
+            interp_jobs = [
+                ('piae', "outputs/checkpoints/piae_v3_s21_final.pt"),
+                ('cvae', "outputs/checkpoints/cvae_v5_physics_supervised_final.pt"),
+            ]
+        else:
+            model_path = args.model_path
+            if not model_path:
+                model_path = (
+                    "outputs/checkpoints/piae_v3_s21_final.pt"
+                    if args.model_type == 'piae'
+                    else "outputs/checkpoints/cvae_v5_physics_supervised_final.pt"
+                )
+                print(f"No --model-path provided, defaulting to: {model_path}")
+            interp_jobs = [(args.model_type, model_path)]
 
-        interpretability.run(
-            model_path=args.model_path,
-            model_type=args.model_type,
-            data_dir=paths['data_dir'],
-            pca_dir=paths['pca_dir'],
-            proc_dir=paths['proc_dir'],
-            splits_dir=paths['splits_dir'],
-            plot_dir="outputs/plots/interp"
-        )
+        for model_type, model_path in interp_jobs:
+            if not os.path.exists(model_path):
+                print(f"\n[pipeline] ⚠️  Checkpoint not found, skipping interp for {model_type.upper()}: {model_path}")
+                continue
+            print("\n" + "="*50)
+            print(f"🚀 STAGE 4: INTERPRETABILITY ({model_type.upper()})")
+            print("="*50)
+            interpretability.run(
+                model_path=model_path,
+                model_type=model_type,
+                data_dir=paths['data_dir'],
+                pca_dir=paths['pca_dir'],
+                proc_dir=paths['proc_dir'],
+                splits_dir=paths['splits_dir'],
+                plot_dir=f"outputs/plots/interp/{model_type}"
+            )
 
 if __name__ == "__main__":
     main()
