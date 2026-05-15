@@ -113,8 +113,125 @@ def realistic_vna_noise(X_2610: np.ndarray,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PCA Diagnostic Plots
+# ─────────────────────────────────────────────────────────────────────────────
+def _plot_scree(pca_full, n_kept: int, plot_dir: str, n_show: int = 80):
+    """
+    Scree plot: individual + cumulative explained variance ratio per PC.
+    Helps decide how many PCs to keep.
+    """
+    _ensure_dir(plot_dir)
+    evr     = pca_full.explained_variance_ratio_
+    n_show  = min(n_show, len(evr))
+    xs      = np.arange(1, n_show + 1)
+    cum     = np.cumsum(evr[:n_show]) * 100.0
+    indiv   = evr[:n_show] * 100.0
+
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+
+    # ── Left: individual EVR (log scale) ────────────────────────────────
+    ax = axes[0]
+    ax.bar(xs, indiv, color='steelblue', alpha=0.75, width=0.85)
+    ax.axvline(n_kept + 0.5, color='crimson', lw=2.0, linestyle='--',
+               label=f'Chosen n={n_kept}  ({indiv[:n_kept].sum():.4f}%)')
+    ax.set_yscale('log')
+    ax.set_xlabel('Principal Component', fontsize=11)
+    ax.set_ylabel('Explained Variance (%, log)', fontsize=11)
+    ax.set_title('Scree Plot — Individual Explained Variance\n'
+                 'Log-scale reveals the elbow clearly', fontsize=10)
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.28, which='both')
+    ax.set_xlim(0.5, n_show + 0.5)
+    ax.set_xticks(xs[::5])
+
+    # ── Right: cumulative EVR ───────────────────────────────────────
+    ax2 = axes[1]
+    ax2.plot(xs, cum, 'ko-', ms=4, lw=1.8)
+    for threshold, color, label in [
+        (99.0,    'orange', '99%'),
+        (99.9,    'green',  '99.9%'),
+        (99.9999, 'red',    '99.9999%'),
+    ]:
+        ax2.axhline(threshold, color=color, lw=1.2, linestyle=':', alpha=0.8, label=label)
+    ax2.axvline(n_kept + 0.5, color='crimson', lw=2.0, linestyle='--',
+                label=f'Chosen n={n_kept}\n→ {cum[n_kept-1]:.6f}%')
+    ax2.set_xlabel('Number of Principal Components', fontsize=11)
+    ax2.set_ylabel('Cumulative Explained Variance (%)', fontsize=11)
+    ax2.set_title('Cumulative Scree Plot\n'
+                  'Use to pick threshold for desired variance retention', fontsize=10)
+    ax2.legend(fontsize=8, loc='lower right')
+    ax2.grid(True, alpha=0.28)
+    ax2.set_xlim(0.5, n_show + 0.5)
+    ax2.set_ylim(None, 100.02)
+    ax2.set_xticks(xs[::5])
+
+    plt.suptitle(
+        f'PCA Scree Plot — 2610-dim SSEC S-parameter Feature Space\n'
+        f'Full SVD: {len(evr)} components  |  Kept: {n_kept}  |'
+        f'  Showing first {n_show}',
+        fontsize=11, fontweight='bold')
+    out = os.path.join(plot_dir, 'pca_scree_plot.png')
+    plt.tight_layout()
+    plt.savefig(out, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"[data] Scree plot → '{out}'")
+
+
+def plot_extended_correlation(proc_dir: str = "data/processed",
+                               plot_dir: str = "outputs/plots/data",
+                               n_ext:    int = 30):
+    """
+    Extended PCA–target correlation heatmap using the first n_ext PCs.
+    Reads ssec_pca_30pc_diag.csv saved by run_pca_pipeline().
+    """
+    _ensure_dir(plot_dir)
+    csv_path = os.path.join(proc_dir, "ssec_pca_30pc_diag.csv")
+    if not os.path.exists(csv_path):
+        print(f"[data] Extended correlation: '{csv_path}' not found — skipping.")
+        return
+
+    df_ext  = pd.read_csv(csv_path)
+    pc_cols = [f'PC{i+1}' for i in range(n_ext) if f'PC{i+1}' in df_ext.columns]
+    tgt     = [t for t in TARGET_COLS if t in df_ext.columns]
+    corr    = df_ext[pc_cols + tgt].corr()
+    pc_tgt  = corr.loc[pc_cols, tgt]
+
+    fig_h = max(10, len(pc_cols) * 0.52)
+    plt.figure(figsize=(13, fig_h))
+    sns.heatmap(
+        pc_tgt, annot=True, cmap='RdBu_r', center=0, fmt=".2f",
+        linewidths=0.4, annot_kws={'size': 8},
+        cbar_kws={'label': 'Pearson Correlation (r)', 'shrink': 0.6}
+    )
+    plt.title(
+        f"Extended Correlation: First {len(pc_cols)} PCs vs. {len(tgt)} Physical Targets\n"
+        f"(PCs beyond the model's kept {N_COMPONENTS} may still encode useful variance)",
+        fontsize=12, pad=14)
+    plt.ylabel("Principal Components", fontsize=11)
+    plt.xlabel("Physical Targets", fontsize=11)
+    plt.yticks(rotation=0, fontsize=8)
+    plt.tight_layout()
+
+    out = os.path.join(plot_dir, f"pca_correlation_heatmap_{n_ext}pc.png")
+    plt.savefig(out, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"[data] Extended ({n_ext}-PC) correlation heatmap → '{out}'")
+
+    # Per-target best-PC summary for all 30
+    print(f"\n── Extended Correlation Summary (top-{n_ext} PCs) ──────────────────")
+    for target in tgt:
+        abs_c   = pc_tgt[target].abs()
+        best_pc = abs_c.idxmax()
+        best_v  = pc_tgt.loc[best_pc, target]
+        rank    = (abs_c.sort_values(ascending=False).index.tolist()[:3])
+        print(f"  {target:>6s}  best={best_pc} (r={best_v:+.3f})  "
+              f"top-3={rank}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Step 0 — Download / load raw data
 # ─────────────────────────────────────────────────────────────────────────────
+
 def load_raw_data(data_dir: str = "data/raw") -> pd.DataFrame:
     """
     Load data.npz from data_dir.  If not present, attempt a gdown download.
@@ -202,20 +319,23 @@ def run_pca_pipeline(X_raw: np.ndarray,
                      train_idx: np.ndarray,
                      pca_dir: str    = "data/pca_artifacts",
                      proc_dir: str   = "data/processed",
+                     plot_dir: str   = "outputs/plots/data",
                      n_components: int = N_COMPONENTS,
                      seed: int = 42,
-                     add_noise: bool = True):
+                     add_noise: bool = True,
+                     n_ext_pcs: int = 30):
     """
     1. (Optional) Add realistic VNA noise to X_raw before any fitting.
     2. Fit StandardScaler on training rows.
     3. Fit full PCA on standardised training data.
-    4. Keep n_components PCs.
+    4. Keep n_components PCs (model artefacts) + n_ext_pcs for diagnostics.
     5. Score-normalise the PCA projections.
-    6. Save all bridge matrices and the final CSV.
+    6. Save all bridge matrices, the final CSV, and a 30-PC diagnostic CSV.
+    7. Plot the scree plot.
 
     Returns: (X_pca_norm, pca_full, scaler, score_mean, score_std)
     """
-    _ensure_dir(pca_dir, proc_dir)
+    _ensure_dir(pca_dir, proc_dir, plot_dir)
 
     # — Optional VNA noise augmentation (applied before any normalisation)
     if add_noise:
@@ -237,7 +357,10 @@ def run_pca_pipeline(X_raw: np.ndarray,
     cum_evr = np.cumsum(evr)
     print(f"[data] Variance captured by {n_components} PCs: {cum_evr[n_components-1]*100:.6f}%")
 
-    # — Project to n_components
+    # — Scree plot (while full PCA object is available)
+    _plot_scree(pca_full, n_components, plot_dir)
+
+    # — Project to n_components (model artefacts)
     X_pca    = pca_full.transform(X_std)[:, :n_components]
     V_pca_np = pca_full.components_[:n_components].T      # shape (DIM_RAW, n_components)
 
@@ -256,7 +379,7 @@ def run_pca_pipeline(X_raw: np.ndarray,
     np.savez(os.path.join(pca_dir, "pca_score_scaler_params.npz"),
              score_mean=score_mean, score_std=score_std, n_components=n_components)
 
-    # — Build and save the final CSV
+    # — Build and save the final model CSV (n_components PCs)
     pc_cols = [f'PC{i+1}' for i in range(n_components)]
     df_pca  = pd.DataFrame(X_pca_norm, columns=pc_cols)
     for k, t in enumerate(TARGET_COLS):
@@ -264,9 +387,20 @@ def run_pca_pipeline(X_raw: np.ndarray,
     csv_path = os.path.join(proc_dir, "ssec_pca_final_v2.csv")
     df_pca.to_csv(csv_path, index=False)
 
+    # — Save extended diagnostic CSV (n_ext_pcs PCs, un-normalised raw scores)
+    n_ext_actual = min(n_ext_pcs, pca_full.n_components_)
+    X_pca_ext    = pca_full.transform(X_std)[:, :n_ext_actual]
+    pc_cols_ext  = [f'PC{i+1}' for i in range(n_ext_actual)]
+    df_ext       = pd.DataFrame(X_pca_ext, columns=pc_cols_ext)
+    for k, t in enumerate(TARGET_COLS):
+        df_ext[t] = Y_raw[:, k]
+    diag_path = os.path.join(proc_dir, "ssec_pca_30pc_diag.csv")
+    df_ext.to_csv(diag_path, index=False)
+    print(f"[data] Extended {n_ext_actual}-PC diagnostic CSV → '{diag_path}'")
+
     print(f"[data] PCA pipeline complete.  "
-          f"Reduced {DIM_RAW} features → {n_components} PCs.  "
-          f"Saved to '{csv_path}'.")
+          f"Reduced {DIM_RAW} features → {n_components} PCs (model) + "
+          f"{n_ext_actual} PCs (diagnostic).  Saved to '{csv_path}'.")
     return X_pca_norm, pca_full, scaler, score_mean, score_std
 
 
@@ -334,9 +468,11 @@ def run(data_dir:    str = "data/raw",
     train_idx, val_idx, test_idx = make_splits(len(df), splits_dir, seed)
     X_pca_norm, pca_full, scaler, score_mean, score_std = run_pca_pipeline(
         X_raw, Y_raw, train_idx,
-        pca_dir=pca_dir, proc_dir=proc_dir, seed=seed, add_noise=add_noise
+        pca_dir=pca_dir, proc_dir=proc_dir, plot_dir=plot_dir,
+        seed=seed, add_noise=add_noise
     )
     plot_pca_target_correlation(proc_dir=proc_dir, plot_dir=plot_dir)
+    plot_extended_correlation(proc_dir=proc_dir, plot_dir=plot_dir, n_ext=30)
 
     print("\n[data] ✅ Data processing complete.\n")
     return {
