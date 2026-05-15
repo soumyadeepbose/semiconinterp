@@ -69,6 +69,50 @@ def _ensure_dir(*paths):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# VNA Noise Augmentation
+# ─────────────────────────────────────────────────────────────────────────────
+# Frequency axis consistent with NF=435 points from 40 MHz to 43.5 GHz
+_FREQS_GHZ = np.linspace(FREQ_START_GHZ, FREQ_STOP_GHZ, NF)
+
+
+def realistic_vna_noise(X_2610: np.ndarray,
+                         freqs_GHz: np.ndarray = _FREQS_GHZ,
+                         sigma_0: float = 0.002,
+                         beta: float = 2.0,
+                         seed: int = None) -> np.ndarray:
+    """
+    Add frequency-dependent VNA measurement noise to the raw 2610-dim feature matrix.
+
+    Noise model: σ(f) = σ_0 · (1 + β · f / f_max)
+      - At low frequencies: σ ≈ σ_0  (thermal/floor noise)
+      - At high frequencies: σ → σ_0·(1+β) (cable/probe losses grow with freq)
+
+    The same envelope is applied to all 6 channels (Re/Im of S11, S21, S22),
+    reflecting a shared cable/probe assembly.
+
+    Args:
+        X_2610    : (N, 2610) raw S-parameter matrix
+        freqs_GHz : (NF,) frequency axis in GHz  [default: linspace(0.04, 43.5, 435)]
+        sigma_0   : base noise level (default 0.002 — ~0.2% of unit S-param range)
+        beta      : high-frequency noise growth factor (default 2.0 → 3× at f_max)
+        seed      : optional RNG seed for reproducibility
+
+    Returns:
+        X_noisy : (N, 2610) array with additive noise applied
+    """
+    rng = np.random.default_rng(seed)
+    # σ(f) shape: (NF,)
+    noise_envelope = sigma_0 * (1.0 + beta * freqs_GHz / freqs_GHz[-1])
+    # Build noise for all 6 channels using the same envelope, then concatenate
+    noise = np.concatenate(
+        [rng.standard_normal(X_2610[:, ch*NF:(ch+1)*NF].shape) * noise_envelope
+         for ch in range(6)],
+        axis=1
+    )
+    return X_2610 + noise
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Step 0 — Download / load raw data
 # ─────────────────────────────────────────────────────────────────────────────
 def load_raw_data(data_dir: str = "data/raw") -> pd.DataFrame:
@@ -159,17 +203,25 @@ def run_pca_pipeline(X_raw: np.ndarray,
                      pca_dir: str    = "data/pca_artifacts",
                      proc_dir: str   = "data/processed",
                      n_components: int = N_COMPONENTS,
-                     seed: int = 42):
+                     seed: int = 42,
+                     add_noise: bool = True):
     """
-    1. Fit StandardScaler on training rows.
-    2. Fit full PCA on standardised training data.
-    3. Keep n_components PCs.
-    4. Score-normalise the PCA projections.
-    5. Save all bridge matrices and the final CSV.
+    1. (Optional) Add realistic VNA noise to X_raw before any fitting.
+    2. Fit StandardScaler on training rows.
+    3. Fit full PCA on standardised training data.
+    4. Keep n_components PCs.
+    5. Score-normalise the PCA projections.
+    6. Save all bridge matrices and the final CSV.
 
     Returns: (X_pca_norm, pca_full, scaler, score_mean, score_std)
     """
     _ensure_dir(pca_dir, proc_dir)
+
+    # — Optional VNA noise augmentation (applied before any normalisation)
+    if add_noise:
+        print(f"[data] Applying realistic VNA noise (σ_0=0.002, β=2.0) …")
+        X_raw = realistic_vna_noise(X_raw, seed=seed)
+        print(f"[data] Noise added.  X_raw shape: {X_raw.shape}")
 
     # — Standardise
     scaler = StandardScaler()
@@ -272,7 +324,8 @@ def run(data_dir:    str = "data/raw",
         pca_dir:     str = "data/pca_artifacts",
         proc_dir:    str = "data/processed",
         plot_dir:    str = "outputs/plots/data",
-        seed:        int = 42):
+        seed:        int = 42,
+        add_noise:   bool = True):
     """Full data-processing pipeline.  Returns paths dict for downstream use."""
     np.random.seed(seed)
 
@@ -281,7 +334,7 @@ def run(data_dir:    str = "data/raw",
     train_idx, val_idx, test_idx = make_splits(len(df), splits_dir, seed)
     X_pca_norm, pca_full, scaler, score_mean, score_std = run_pca_pipeline(
         X_raw, Y_raw, train_idx,
-        pca_dir=pca_dir, proc_dir=proc_dir, seed=seed
+        pca_dir=pca_dir, proc_dir=proc_dir, seed=seed, add_noise=add_noise
     )
     plot_pca_target_correlation(proc_dir=proc_dir, plot_dir=plot_dir)
 
