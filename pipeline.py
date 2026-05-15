@@ -31,6 +31,7 @@ import data_processing
 import piae_model
 import cvae_model
 import interpretability
+import interp_extension
 
 def main():
     parser = argparse.ArgumentParser(description="SSEC Semiconductor Pipeline")
@@ -130,6 +131,18 @@ def main():
                 proc_dir=paths['proc_dir'],
                 splits_dir=paths['splits_dir'],
                 plot_dir=f"outputs/plots/interp/{model_type}"
+            )
+            print("\n" + "-"*50)
+            print(f"🔬 STAGE 4b: INTERP EXTENSION ({model_type.upper()})")
+            print("-"*50)
+            interp_extension.run(
+                model_path=model_path,
+                model_type=model_type,
+                data_dir=paths['data_dir'],
+                pca_dir=paths['pca_dir'],
+                proc_dir=paths['proc_dir'],
+                splits_dir=paths['splits_dir'],
+                plot_dir=f"outputs/plots/interp/{model_type}/ext"
             )
 
 if __name__ == "__main__":
