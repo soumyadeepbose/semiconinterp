@@ -54,6 +54,7 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler as _SS
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score
+from csv_utils import csv_save
 
 warnings.filterwarnings("ignore")
 
@@ -231,6 +232,14 @@ def run_counterfactual_analysis(model: nn.Module, model_type: str,
                  f'({model_type.upper()})  Diagonal = perfect self-consistency',
                  fontsize=10, fontweight='bold')
     out1 = os.path.join(plot_dir, f"{model_type}_counterfactual_causal_closure.png")
+    # — CSV: causal closure error per parameter
+    rows = []
+    for k, name in enumerate(targets):
+        sv, re = results[name]
+        rows.append({'param': name,
+                     'closure_error_mean': np.mean(np.abs(re[:, k] - sv)),
+                     'closure_error_max':  np.max(np.abs(re[:, k] - sv))})
+    csv_save(pd.DataFrame(rows), out1)
     plt.tight_layout(); plt.savefig(out1, dpi=150, bbox_inches='tight'); plt.close()
     print(f"  [A] Causal closure → '{out1}'")
 
@@ -257,6 +266,16 @@ def run_counterfactual_analysis(model: nn.Module, model_type: str,
                  f'Dotted: nominal.',
                  fontsize=9, fontweight='bold')
     out2 = os.path.join(plot_dir, f"{model_type}_counterfactual_independence.png")
+    # — CSV: full independence grid (source param × effect param × sweep step)
+    rows = []
+    for ks, src_name in enumerate(targets):
+        sv, re = results[src_name]
+        for step_i, sv_val in enumerate(sv):
+            row = {'source_param': src_name, 'sweep_val': sv_val}
+            for ke, eff_name in enumerate(targets):
+                row[f're_encoded_{eff_name}'] = re[step_i, ke]
+            rows.append(row)
+    csv_save(pd.DataFrame(rows), out2)
     plt.tight_layout(); plt.savefig(out2, dpi=150, bbox_inches='tight'); plt.close()
     print(f"  [A] Independence grid → '{out2}'")
 
@@ -366,6 +385,10 @@ def run_roundtrip_decay(model: nn.Module, model_type: str,
                  f'  (n={len(idx)} test samples)',
                  fontsize=10, fontweight='bold')
     out1 = os.path.join(plot_dir, f"{model_type}_roundtrip_mape_per_round.png")
+    # — CSV: MAPE per round and per parameter
+    rt_df = pd.DataFrame(mape_all, columns=targets)
+    rt_df.insert(0, 'round', rounds)
+    csv_save(rt_df, out1)
     plt.tight_layout(); plt.savefig(out1, dpi=150, bbox_inches='tight'); plt.close()
     print(f"  [B] Round-trip decay → '{out1}'")
 
@@ -388,6 +411,11 @@ def run_roundtrip_decay(model: nn.Module, model_type: str,
     ax3.set_xticks(rounds)
 
     out2 = os.path.join(plot_dir, f"{model_type}_roundtrip_contraction.png")
+    # — CSV: normalised MAPE (relative to round-0 baseline)
+    norm_df = pd.DataFrame({'round': rounds})
+    for k, name in enumerate(targets):
+        norm_df[f'{name}_norm'] = mape_all[:, k] / (mape_all[0, k] + 1e-6)
+    csv_save(norm_df, out2)
     plt.tight_layout(); plt.savefig(out2, dpi=150, bbox_inches='tight'); plt.close()
     print(f"  [B] Contraction test  → '{out2}'")
 
@@ -605,6 +633,11 @@ def run_resonance_probing(model: nn.Module, model_type: str,
                  f'({model_type.upper()})',
                  fontsize=10, fontweight='bold')
     out1 = os.path.join(plot_dir, f"{model_type}_resonance_probe_r2_vs_depth.png")
+    # — CSV: R² per derived quantity × layer
+    lin_df = pd.DataFrame(r2_linear,  index=layer_names).T.reset_index().rename(columns={'index':'qty'})
+    mlp_df = pd.DataFrame(r2_nonlinear, index=layer_names).T.reset_index().rename(columns={'index':'qty'})
+    csv_save(lin_df, out1, suffix='__linear')
+    csv_save(mlp_df, out1, suffix='__mlp')
     plt.tight_layout(); plt.savefig(out1, dpi=150, bbox_inches='tight'); plt.close()
     print(f"  [C] R² vs depth → '{out1}'")
 
@@ -636,6 +669,11 @@ def run_resonance_probing(model: nn.Module, model_type: str,
                  f'Green = physics quantity is linearly/nonlinearly encoded at this layer',
                  fontsize=10, fontweight='bold')
     out2 = os.path.join(plot_dir, f"{model_type}_resonance_probe_heatmap.png")
+    # — CSV: linear and MLP R² matrices
+    csv_save(pd.DataFrame(mat_lin, index=qty_labels,
+                          columns=[ln.replace('enc_','') for ln in layer_names]), out2, suffix='__linear')
+    csv_save(pd.DataFrame(mat_mlp, index=qty_labels,
+                          columns=[ln.replace('enc_','') for ln in layer_names]), out2, suffix='__mlp')
     plt.tight_layout(); plt.savefig(out2, dpi=150, bbox_inches='tight'); plt.close()
     print(f"  [C] Heatmap → '{out2}'")
 
@@ -768,6 +806,22 @@ def run_weight_svd(model: nn.Module, model_type: str,
                  f'({model_type.upper()})  Rapid drop-off = low-rank structure',
                  fontsize=10, fontweight='bold')
     out1 = os.path.join(plot_dir, f"{model_type}_weight_svd_spectra.png")
+    # — CSV: effective rank and top singular values per layer
+    rows = [{'layer': name,
+             'shape': str(res['shape']),
+             'effective_rank': res['r_eff'],
+             'sigma_max': res['S'][0],
+             'sigma_min': res['S'][-1]}
+            for name, res in svd_results.items()]
+    csv_save(pd.DataFrame(rows), out1, suffix='__summary')
+    # — also export full singular value spectra
+    sv_dict = {'sv_index': list(range(max(len(res['S']) for res in svd_results.values())))}
+    for name, res in svd_results.items():
+        s_padded = np.pad(res['S'],
+                          (0, len(sv_dict['sv_index']) - len(res['S'])),
+                          constant_values=np.nan)
+        sv_dict[name] = s_padded
+    csv_save(sv_dict, out1, suffix='__spectra')
     plt.tight_layout(); plt.savefig(out1, dpi=150, bbox_inches='tight'); plt.close()
     print(f"  [D] SVD spectra → '{out1}'")
 
@@ -831,10 +885,13 @@ def run_weight_svd(model: nn.Module, model_type: str,
                      fontsize=10, fontweight='bold')
         out2 = os.path.join(plot_dir,
                              f"{model_type}_weight_svd_first_layer_alignment.png")
+        # — CSV: alignment matrix (SV × PC)
+        csv_save(pd.DataFrame(align_mat,
+                              index=[f'SV{i+1}' for i in range(n_show)],
+                              columns=pc_labels), out2)
         plt.tight_layout(); plt.savefig(out2, dpi=150, bbox_inches='tight')
         plt.close()
         print(f"  [D] First-layer alignment → '{out2}'")
-
     return svd_results
 
 

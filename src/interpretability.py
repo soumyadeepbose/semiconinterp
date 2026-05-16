@@ -1225,6 +1225,18 @@ def run_physics_knowledge_extraction(
         f'high R² = model has implicitly learned the circuit physics.',
         fontsize=10, fontweight='bold')
     out_a = os.path.join(plot_dir, f"{model_type}_A_derived_quantities.png")
+    # — CSV: derived-quantity R² and MAPE + per-sample scatter data
+    summary_rows = [{'qty': k, 'r2': v, 'mape_pct': mape_derived[k]}
+                    for k, v in r2_derived.items()]
+    import pandas as pd
+    csv_save(pd.DataFrame(summary_rows), out_a, suffix='__summary')
+    # Also export true vs predicted for each derived quantity
+    scatter_rows = {}
+    for qty_name, (yp, yt, _) in derived.items():
+        tag = qty_name.split('\n')[0].replace(' ', '_').replace('/', '_').replace('₂', '2')
+        scatter_rows[f'{tag}_true'] = yt
+        scatter_rows[f'{tag}_pred'] = yp
+    csv_save(scatter_rows, out_a, suffix='__scatter')
     plt.tight_layout()
     plt.savefig(out_a, dpi=150, bbox_inches='tight')
     plt.close()
@@ -1308,6 +1320,23 @@ def run_physics_knowledge_extraction(
         f'Fixture distortion = gap between S→Z curves and Z_int curves',
         fontsize=9, fontweight='bold')
     out_b = os.path.join(plot_dir, f"{model_type}_B_cole_cole_arcs.png")
+    # — CSV: Cole-Cole arc data for each sampled device
+    import pandas as pd
+    rows = []
+    for si, s in enumerate(samp):
+        S11_d_  = R11_d[s] + 1j * I11_d[s]
+        S11_t__ = R11_t[s] + 1j * I11_t[s]
+        Zap_d   = _S11_to_Zin(S11_d_)
+        Zap_t   = _S11_to_Zin(S11_t__)
+        Zth_p_  = _Z_intrinsic(freqs_GHz, Ra_p[s], Rb_p[s], Cb_p[s], Rd_p[s], Cd_p[s])
+        Zth_t_  = _Z_intrinsic(freqs_GHz, Ra_t[s], Rb_t[s], Cb_t[s], Rd_t[s], Cd_t[s])
+        for fi in range(len(freqs_GHz)):
+            rows.append({'sample': int(s), 'freq_GHz': freqs_GHz[fi],
+                         'Zapp_d_Re': Zap_d[fi].real, 'Zapp_d_Im': -Zap_d[fi].imag,
+                         'Zapp_t_Re': Zap_t[fi].real, 'Zapp_t_Im': -Zap_t[fi].imag,
+                         'Zth_pred_Re': Zth_p_[fi].real, 'Zth_pred_Im': -Zth_p_[fi].imag,
+                         'Zth_true_Re': Zth_t_[fi].real, 'Zth_true_Im': -Zth_t_[fi].imag})
+    csv_save(pd.DataFrame(rows), out_b)
     plt.tight_layout()
     plt.savefig(out_b, dpi=150, bbox_inches='tight')
     plt.close()
@@ -1374,6 +1403,12 @@ def run_physics_knowledge_extraction(
         f'Middle/Right: accuracy of f_d, f_b extraction',
         fontsize=9, fontweight='bold')
     out_c = os.path.join(plot_dir, f"{model_type}_C_corner_freq_consistency.png")
+    # — CSV: per-sample corner frequency data
+    import pandas as pd
+    csv_save({'f_empirical_GHz': f_empirical,
+              'fd_pred_GHz': fd_pred, 'fd_true_GHz': fd_true,
+              'fb_pred_GHz': fb_pred, 'fb_true_GHz': fb_true,
+              'f_dom_pred_GHz': f_dom_pred, 'f_dom_true_GHz': f_dom_true}, out_c)
     plt.tight_layout()
     plt.savefig(out_c, dpi=150, bbox_inches='tight')
     plt.close()
@@ -1487,6 +1522,10 @@ def run_physics_knowledge_extraction(
         f'"What intermediate steps in the expert workflow has the model internalised?"',
         fontsize=9, fontweight='bold')
     out_d = os.path.join(plot_dir, f"{model_type}_D_physics_chain.png")
+    # — CSV: physics chain R² and MAPE per step
+    import pandas as pd
+    chain_df = pd.DataFrame({'step': labels_chain, 'r2': r2_chain, 'mape_pct': mape_chain})
+    csv_save(chain_df, out_d)
     plt.tight_layout()
     plt.savefig(out_d, dpi=150, bbox_inches='tight')
     plt.close()
