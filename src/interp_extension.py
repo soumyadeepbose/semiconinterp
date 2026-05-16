@@ -108,7 +108,7 @@ def _decode_to_spectrum(model: nn.Module, bott: torch.Tensor,
     if model_type == 'piae':
         z_pca  = model.decoder(bott)
         X_base = model.pca_invert(z_pca)
-        return X_base + 0.01 * model.residual_net(X_base)
+        return X_base # + 0.01 * model.residual_net(X_base)
     else:
         z_pca = model.decoder(bott)
         return model.pca_invert(z_pca)

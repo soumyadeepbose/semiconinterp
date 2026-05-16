@@ -161,10 +161,10 @@ class PIAE(nn.Module):
         super().__init__()
         self.encoder      = Encoder(input_dim=dim_pca, output_dim=DIM_PHYS)
         self.decoder      = Decoder(input_dim=DIM_PHYS, output_dim=dim_pca)
-        self.residual_net = nn.Sequential(
-            nn.Linear(DIM_RAW, 512), nn.ReLU(), nn.Linear(512, DIM_RAW))
-        nn.init.zeros_(self.residual_net[-1].weight)
-        nn.init.zeros_(self.residual_net[-1].bias)
+        # self.residual_net = nn.Sequential(
+        #     nn.Linear(DIM_RAW, 512), nn.ReLU(), nn.Linear(512, DIM_RAW))
+        # nn.init.zeros_(self.residual_net[-1].weight)
+        # nn.init.zeros_(self.residual_net[-1].bias)
         for name, buf in [('V_pca', V_pca), ('mu_pca', mu_pca),
                           ('score_mean', score_mean), ('score_std', score_std),
                           ('feature_mean', feature_mean), ('feature_std', feature_std)]:
@@ -178,10 +178,20 @@ class PIAE(nn.Module):
     def forward(self, x_pca):
         y_bott         = self.encoder(x_pca)
         z_recon        = self.decoder(y_bott)
-        X_pca_only     = self.pca_invert(z_recon)
-        X_true         = self.pca_invert(x_pca)
-        X_decoded      = X_pca_only + 0.01 * self.residual_net(X_pca_only)
-        return z_recon, y_bott, X_decoded, X_true
+        # # 1. Standard PCA Inversion
+        # X_2610_pca_only = self.pca_invert(z_recon)
+        # X_2610_true     = self.pca_invert(x_pca)
+
+        # # 2. Add non-linear residual perturbation to enforce strict physics
+        # X_2610_decoded = X_2610_pca_only + 0.01 * self.residual_net(X_2610_pca_only)
+
+        # return z_recon, y_bott, X_2610_decoded, X_2610_true
+
+        # REPLACE WITH THIS
+        X_2610_decoded = self.pca_invert(z_recon)
+        X_2610_true    = self.pca_invert(x_pca)
+
+        return z_recon, y_bott, X_2610_decoded, X_2610_true
 
 
 # ─────────────────────────────────────────────────────────────────────────────
