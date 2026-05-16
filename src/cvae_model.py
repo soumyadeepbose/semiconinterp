@@ -45,7 +45,8 @@ LDV_IDX = TARGET_COLS.index('Ldv')
 OBS_IDX = [i for i in range(DIM_PHYS) if i != LDV_IDX]
 
 # Weights
-PHYS_WEIGHTS  = [1.0, 1.0, 1.0, 0.0, 1.0, 5.0]  # Ldv weight = 0.0
+PHYS_WEIGHTS  = [1.0, 1.0, 1.0, 0.0, 1.0, 5.0]   # Ldv weight = 0.0 (unobservable)
+AUG_SIGMA     = 0.05   # std-dev of Gaussian noise added to normalised PCA scores during training
 BETA_KL       = 0.3
 BETA_LDV_MULT = 10.0
 LAMBDA1       = 15.0
@@ -254,6 +255,20 @@ def cvae_loss(z_recon, x_pca, mu, logvar, y_gt, X_2610_decoded, epoch, pw):
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Training-time Augmentation
+# ─────────────────────────────────────────────────────────────────────────────
+def _augment_pca_scores(x_pca: torch.Tensor, sigma: float = AUG_SIGMA) -> torch.Tensor:
+    """
+    Add i.i.d. Gaussian noise to normalised PCA scores during training.
+    Implements a denoising-autoencoder objective:
+      - Model input : x_pca + noise  (corrupted)
+      - Recon target: x_pca          (clean)
+    sigma=0.05 ≈ 5% of each dim's std. Applied only during training.
+    """
+    return x_pca + sigma * torch.randn_like(x_pca)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Training
 # ─────────────────────────────────────────────────────────────────────────────
 def _smape_obs(y_pred_phys, y_true_phys):
@@ -278,9 +293,10 @@ def train_cvae(model, train_loader, val_loader, y_scalers, log_idx, device, epoc
         accum = {k: 0.0 for k in keys}; n_seen = 0
         for x_b, y_b in train_loader:
             x_b, y_b = x_b.to(device), y_b.to(device)
+            x_b_noisy = _augment_pca_scores(x_b)          # corrupted input
             optimizer.zero_grad()
-            z_recon, mu, logvar, X_dec, _ = model(x_b)
-            L_total, comp = cvae_loss(z_recon, x_b, mu, logvar, y_b, X_dec, epoch, pw)
+            z_recon, mu, logvar, X_dec, _ = model(x_b_noisy)              # forward on noisy
+            L_total, comp = cvae_loss(z_recon, x_b, mu, logvar, y_b, X_dec, epoch, pw)  # recon target = clean x_b
             L_total.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()

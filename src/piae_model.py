@@ -42,6 +42,7 @@ DIM_PHYS = 5         # Ld excluded
 TARGET_COLS  = ['Rbv', 'Cbv', 'Rdv', 'Cdv', 'Rav']
 LOG_TARGETS  = ['Rbv', 'Cbv', 'Rdv']        # Cdv and Rav stay in linear space
 PHYS_WEIGHTS = [1.0, 1.0, 1.0, 1.0, 5.0]   # Rav gets extra weight
+AUG_SIGMA    = 0.05   # std-dev of Gaussian noise added to normalised PCA scores during training
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -215,6 +216,22 @@ def quad_loss(z_recon, x_pca, y_bott, y_gt, X_dec, epoch, pw):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Training-time Augmentation
+# ─────────────────────────────────────────────────────────────────────────────
+def _augment_pca_scores(x_pca: torch.Tensor, sigma: float = AUG_SIGMA) -> torch.Tensor:
+    """
+    Add i.i.d. Gaussian noise to normalised PCA scores during training.
+    Implements a denoising-autoencoder objective:
+      - Model input : x_pca + noise  (corrupted)
+      - Recon target: x_pca          (clean)
+    Noise lives in PCA-score space (zero-mean, unit-std per dim),
+    so sigma=0.05 ≈ 5% of each dimension's std — mild but effective.
+    Applied only during training; validation/test use clean scores.
+    """
+    return x_pca + sigma * torch.randn_like(x_pca)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Training
 # ─────────────────────────────────────────────────────────────────────────────
 def train_piae(model, train_loader, val_loader, y_scalers, log_idx,
@@ -235,9 +252,10 @@ def train_piae(model, train_loader, val_loader, y_scalers, log_idx,
         acc = {k: 0.0 for k in keys}; n = 0
         for xb, yb in train_loader:
             xb, yb = xb.to(device), yb.to(device)
+            xb_noisy = _augment_pca_scores(xb)     # corrupted input
             optimizer.zero_grad()
-            zr, yh, Xd, _ = model(xb)
-            Lt, comp = quad_loss(zr, xb, yh, yb, Xd, ep, pw)
+            zr, yh, Xd, _ = model(xb_noisy)        # forward on noisy input
+            Lt, comp = quad_loss(zr, xb, yh, yb, Xd, ep, pw)  # recon target = clean xb
             Lt.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()

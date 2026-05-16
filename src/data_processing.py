@@ -50,6 +50,7 @@ N_COMPONENTS    = 10           # forced 10 PCs to capture Rav in PC10
 VARIANCE_TARGET = 0.999999     # for reference / logging only
 TARGET_COLS     = ['Rbv', 'Cbv', 'Rdv', 'Ldv', 'Cdv', 'Rav']
 GDRIVE_FILE_ID  = "1EhVuXg7rZus_efQG9aHYI3i39AauItAp"
+NOISE_SIGMA = 0.002
 
 FREQ_START_GHZ  = 0.04
 FREQ_STOP_GHZ   = 43.5
@@ -77,7 +78,7 @@ _FREQS_GHZ = np.linspace(FREQ_START_GHZ, FREQ_STOP_GHZ, NF)
 
 def realistic_vna_noise(X_2610: np.ndarray,
                          freqs_GHz: np.ndarray = _FREQS_GHZ,
-                         sigma_0: float = 0.002,
+                         sigma_0: float = NOISE_SIGMA,
                          beta: float = 2.0,
                          seed: int = None) -> np.ndarray:
     """
@@ -322,7 +323,7 @@ def run_pca_pipeline(X_raw: np.ndarray,
                      plot_dir: str   = "outputs/plots/data",
                      n_components: int = N_COMPONENTS,
                      seed: int = 42,
-                     add_noise: bool = True,
+                     add_noise: bool = False,
                      n_ext_pcs: int = 30):
     """
     1. (Optional) Add realistic VNA noise to X_raw before any fitting.
@@ -339,7 +340,7 @@ def run_pca_pipeline(X_raw: np.ndarray,
 
     # — Optional VNA noise augmentation (applied before any normalisation)
     if add_noise:
-        print(f"[data] Applying realistic VNA noise (σ_0=0.002, β=2.0) …")
+        print(f"[data] Applying realistic VNA noise (σ_0={NOISE_SIGMA}, β=2.0) …")
         X_raw = realistic_vna_noise(X_raw, seed=seed)
         print(f"[data] Noise added.  X_raw shape: {X_raw.shape}")
 
@@ -459,7 +460,7 @@ def run(data_dir:    str = "data/raw",
         proc_dir:    str = "data/processed",
         plot_dir:    str = "outputs/plots/data",
         seed:        int = 42,
-        add_noise:   bool = True):
+        add_noise:   bool = False):  # noise moved to training-loop augmentation
     """Full data-processing pipeline.  Returns paths dict for downstream use."""
     np.random.seed(seed)
 
