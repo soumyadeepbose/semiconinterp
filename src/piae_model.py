@@ -28,7 +28,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, Subset
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.metrics import r2_score
+from sklearn.metrics import r2_score, mean_squared_error
+from csv_utils import csv_save
 warnings.filterwarnings("ignore")
 
 
@@ -344,6 +345,12 @@ def evaluate(model, loader, y_scalers, log_idx, device, split_name='Test',
             ax2.set_xlabel('True', fontsize=8); ax2.set_ylabel('Pred − True', fontsize=8)
         plt.suptitle(f'PIAE — Parity & Residual Plots [{split_name}]', fontsize=11)
         out = os.path.join(plot_dir, f"piae_parity_{split_name.lower()}.png")
+        # — CSV export: true & predicted values per parameter
+        rec = {'sample_idx': np.arange(len(yt))}
+        for k, name in enumerate(TARGET_COLS):
+            rec[f'{name}_true'] = yt[:, k]
+            rec[f'{name}_pred'] = yp[:, k]
+        csv_save(rec, out)
         plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
         print(f"[piae] Parity plots → '{out}'")
 
@@ -392,6 +399,13 @@ def plot_training_curves(history, plot_dir):
     axes[2].plot(ep, history['val_mape'], color='purple')
     axes[2].set_title('Validation MAPE (%)')
     out = os.path.join(plot_dir, "piae_training_curves.png")
+    # — CSV export
+    hist_df = pd.DataFrame({'epoch': list(ep)})
+    for k in ['total', 'recon', 'phys', 'passiv', 'smooth']:
+        hist_df[f'train_{k}'] = history[f'train_{k}']
+    hist_df['val_total'] = history['val_total']
+    hist_df['val_mape']  = history['val_mape']
+    csv_save(hist_df, out)
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[piae] Training curves → '{out}'")
 
@@ -420,9 +434,15 @@ def plot_decoder_validation(model, loader, device, plot_dir, n_samples=3):
             if row==0 and col==0: ax.legend(fontsize=7)
     plt.suptitle('PIAE Decoder Reconstruction Quality', fontsize=10)
     out = os.path.join(plot_dir, "piae_decoder_validation.png")
+    # — CSV export: one sub-CSV per sample
+    for row in range(n_samples):
+        rec = {'freq_GHz': fq}
+        for col, (title, sl) in enumerate(panels):
+            rec[f'{title.replace(" ","_")}_true']    = Xt[row, sl]
+            rec[f'{title.replace(" ","_")}_decoded'] = Xd[row, sl]
+        csv_save(rec, out, suffix=f'__sample{row+1}')
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[piae] Decoder validation → '{out}'")
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Top-level runner

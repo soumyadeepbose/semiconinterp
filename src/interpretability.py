@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset, DataLoader, Subset
 from sklearn.metrics import r2_score
+from csv_utils import csv_save
 
 warnings.filterwarnings("ignore")
 
@@ -159,6 +160,10 @@ def compute_crosstalk_matrix(model, model_type, loader, device, targets, plot_di
     plt.ylabel('Bottleneck Parameter')
     plt.xlabel('Input PC')
     out = os.path.join(plot_dir, f"{model_type}_crosstalk_matrix.png")
+    # — CSV export: row-normalised Jacobian matrix (targets × PCs)
+    import pandas as pd
+    csv_save(pd.DataFrame(J_norm, index=targets,
+                          columns=[f'PC{i+1}' for i in range(dim_pca)]), out)
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] Crosstalk matrix → '{out}'")
 
@@ -225,6 +230,14 @@ def plot_integrated_gradients(model, model_type, X_raw, Y_raw, device, targets, 
 
     plt.suptitle(f'Integrated Gradients Frequency Attribution ({model_type.upper()})', fontsize=12)
     out = os.path.join(plot_dir, f"{model_type}_integrated_gradients.png")
+    # — CSV export: attribution per target × raw feature
+    import pandas as pd
+    fq = np.linspace(0.04, 43.5, NF)
+    ch_names = ([f'S11_Re_{f:.3f}GHz' for f in fq] + [f'S11_Im_{f:.3f}GHz' for f in fq] +
+                [f'S21_Re_{f:.3f}GHz' for f in fq] + [f'S21_Im_{f:.3f}GHz' for f in fq] +
+                [f'S22_Re_{f:.3f}GHz' for f in fq] + [f'S22_Im_{f:.3f}GHz' for f in fq])
+    ig_df = pd.DataFrame(attributions, index=targets, columns=ch_names)
+    csv_save(ig_df, out)
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] Integrated Gradients → '{out}'")
 
@@ -378,6 +391,9 @@ def plot_smith_traversal(model, model_type, loader, device, targets, plot_dir):
     plt.suptitle(f"Smith Chart — Latent Manifold Traversal (S11 @ centre freq.)\n"
                  f"({model_type.upper()}, 2610-dim)", fontsize=12)
     out = os.path.join(plot_dir, f"{model_type}_smith_traversal_center_freq.png")
+    # — CSV export: arc-length summary
+    csv_save({'param': list(arc_lengths.keys()),
+              'geodesic_arc_length': list(arc_lengths.values())}, out)
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] Smith traversal (centre freq) → '{out}'")
 
@@ -404,6 +420,16 @@ def plot_smith_traversal(model, model_type, loader, device, targets, plot_dir):
 
     plt.suptitle(f"Smith Chart — Full S11 Spectrum Loci ({model_type.upper()})", fontsize=12)
     out2 = os.path.join(plot_dir, f"{model_type}_smith_full_locus.png")
+    # — CSV export: centre-freq locus per param at each traversal step
+    fq_vec = np.linspace(0.04, 43.5, NF)
+    rows = []
+    for pname, (sweep_vals, S11, _, _) in traversals.items():
+        for step_i, sv in enumerate(sweep_vals):
+            rows.append({'param': pname, 'sweep_val': sv,
+                         'cf_S11_re': S11[step_i, NF//2].real,
+                         'cf_S11_im': S11[step_i, NF//2].imag})
+    import pandas as pd
+    csv_save(pd.DataFrame(rows), out2)
     plt.tight_layout(); plt.savefig(out2, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] Smith full locus → '{out2}'")
 
@@ -520,6 +546,10 @@ def plot_ig_heatmap(freq_attrs, targets, model_type, plot_dir):
                  "(row-normalised; brighter = more informative for that parameter)", fontsize=11)
     plt.colorbar(im, ax=ax, label='Normalised |IG|')
     out = os.path.join(plot_dir, f"{model_type}_ig_heatmap.png")
+    # — CSV export: row-normalised IG heatmap values
+    import pandas as pd
+    csv_save(pd.DataFrame(freq_attrs_norm, index=targets,
+                          columns=[f'f{i}' for i in range(NF)]), out)
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] IG heatmap → '{out}'")
 
@@ -548,6 +578,13 @@ def plot_ig_per_param(freq_attrs, targets, model_type, plot_dir):
     plt.suptitle(f"IG — Per-parameter Frequency Attribution ({model_type.upper()})\n"
                  f"averaged over test samples; end-to-end w.r.t. raw S-params", fontsize=12)
     out = os.path.join(plot_dir, f"{model_type}_ig_per_param.png")
+    # — CSV export: per-target IG curves
+    fq_vec = np.linspace(0.04, 43.5, NF)
+    import pandas as pd
+    ig_df = pd.DataFrame({'freq_GHz': fq_vec})
+    for p_idx, pname in enumerate(targets):
+        ig_df[pname] = freq_attrs[p_idx]
+    csv_save(ig_df, out)
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] IG per-param curves → '{out}'")
 
@@ -596,6 +633,22 @@ def plot_ig_channel_breakdown(chan_attrs, targets, model_type, plot_dir):
     plt.suptitle(f"IG — Spectral Band Energy Breakdown ({model_type.upper()})\n"
                  "low / mid / high: thirds of frequency range", fontsize=12)
     out = os.path.join(plot_dir, f"{model_type}_ig_band_breakdown.png")
+    # — CSV export: per-target band energy fractions
+    rows = []
+    fq_vec = np.linspace(0.04, 43.5, NF)
+    low_i, mid_i = NF // 3, 2 * NF // 3
+    for p_idx, pname in enumerate(targets):
+        att = (chan_attrs[p_idx][0:NF] + chan_attrs[p_idx][NF:2*NF] +
+               chan_attrs[p_idx][2*NF:3*NF] + chan_attrs[p_idx][3*NF:4*NF] +
+               chan_attrs[p_idx][4*NF:5*NF] + chan_attrs[p_idx][5*NF:]) / 6.0
+        tot = att.sum() + 1e-30
+        rows.append({'param': pname,
+                     'low_band_pct':  att[:low_i].sum() / tot * 100,
+                     'mid_band_pct':  att[low_i:mid_i].sum() / tot * 100,
+                     'high_band_pct': att[mid_i:].sum() / tot * 100,
+                     'peak_freq_GHz': fq_vec[np.argmax(att)]})
+    import pandas as pd
+    csv_save(pd.DataFrame(rows), out)
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] IG band breakdown → '{out}'")
 
@@ -675,6 +728,10 @@ def plot_encoder_crosstalk(y_bott_np, Y_test_phys, targets, model_type, plot_dir
 
     plt.suptitle('Encoder Crosstalk Matrix\nIdeal: diagonal=1, off-diagonal≈0', fontsize=10)
     out = os.path.join(plot_dir, f"{model_type}_encoder_crosstalk.png")
+    # — CSV: raw and normalised crosstalk matrices
+    import pandas as pd
+    csv_save(pd.DataFrame(crosstalk_raw,  index=targets, columns=targets), out, suffix='__raw')
+    csv_save(pd.DataFrame(crosstalk_norm, index=targets, columns=targets), out, suffix='__norm')
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] Crosstalk matrix → '{out}'")
 
@@ -736,6 +793,20 @@ def plot_fidelity_by_regime(X_dec_np, X_true_np, Y_pred_phys, Y_test_phys,
                  'Row 1: decoder MSE  |  Row 2: MAPE  |  Row 3: passivity violation',
                  fontsize=10, fontweight='bold')
     out = os.path.join(plot_dir, f"{model_type}_fidelity_by_regime.png")
+    # — CSV: per-param fidelity metrics across regime bins
+    rows = []
+    for k, name in enumerate(targets):
+        param_vals = Y_test_phys[:, k]
+        qs = np.quantile(param_vals, np.linspace(0, 1, n_bins + 1))
+        for b in range(n_bins):
+            mask = (param_vals >= qs[b]) & (param_vals < qs[b+1])
+            if mask.sum() < 5: continue
+            rows.append({'param': name, 'bin_center': 0.5*(qs[b]+qs[b+1]),
+                         'mean_recon_mse': recon_mse[mask].mean(),
+                         'mean_mape_pct': pct_err[mask, k].mean(),
+                         'mean_passiv_viol': passiv_viol[mask].mean()})
+    import pandas as pd
+    csv_save(pd.DataFrame(rows), out)
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] Fidelity by regime → '{out}'")
 
@@ -776,6 +847,14 @@ def plot_residual_analysis(X_dec_np, X_true_np, Y_pred_phys, Y_test_phys,
                  'Blue: mean (Decoded − True) ± 1σ  |  Flat at 0 = unbiased',
                  fontsize=10, fontweight='bold')
     out3a = os.path.join(plot_dir, f"{model_type}_residual_bias.png")
+    # — CSV: mean bias & std per channel × frequency
+    fq_vec = np.linspace(0.04, 43.5, NF)
+    bias_df = pd.DataFrame({'freq_GHz': fq_vec})
+    for ax_obj, (title, sl) in zip(axes.flatten(), panels):
+        tag = title.replace('(','').replace(')','').replace(' ','_')
+        bias_df[f'{tag}_mean'] = delta_X[:, sl].mean(axis=0)
+        bias_df[f'{tag}_std']  = delta_X[:, sl].std(axis=0)
+    csv_save(bias_df, out3a)
     plt.tight_layout(); plt.savefig(out3a, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] Residual bias → '{out3a}'")
 
@@ -812,6 +891,11 @@ def plot_residual_analysis(X_dec_np, X_true_np, Y_pred_phys, Y_test_phys,
                  'High r at freq f = mispredicting param corrupts S at f',
                  fontsize=9, fontweight='bold')
     out3b = os.path.join(plot_dir, f"{model_type}_residual_error_correlation.png")
+    # — CSV: Spearman correlation per param × subsampled frequency
+    corr_df = pd.DataFrame({'freq_GHz': freqs_sub})
+    for k, name in enumerate(targets):
+        corr_df[name] = resid_err_corr[k]
+    csv_save(corr_df, out3b)
     plt.tight_layout(); plt.savefig(out3b, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] Residual-error correlation → '{out3b}'")
 
@@ -842,6 +926,15 @@ def plot_residual_analysis(X_dec_np, X_true_np, Y_pred_phys, Y_test_phys,
                  f'PC1 explains {evr_resid[0]*100:.1f}% of residual variance',
                  fontsize=10, fontweight='bold')
     out3c = os.path.join(plot_dir, f"{model_type}_residual_pca.png")
+    # — CSV: residual EVR + PC1-param correlations
+    corr_vals = []
+    for k, name in enumerate(targets):
+        r_val, _ = pearsonr(resid_scores_pc1, pct_err[:, k])
+        corr_vals.append(abs(r_val))
+    csv_save({'residual_pc': list(range(1, len(evr_resid)+1)),
+              'evr_pct':     list(evr_resid * 100),
+              'cum_evr_pct': list(np.cumsum(evr_resid) * 100)}, out3c, suffix='__scree')
+    csv_save({'param': targets, 'abs_pearson_r_with_PC1': corr_vals}, out3c, suffix='__pc1_corr')
     plt.tight_layout(); plt.savefig(out3c, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] Residual PCA → '{out3c}'")
     print(f"  Residual PC1: {evr_resid[0]*100:.1f}%   first 3: {cum_resid[2]*100:.1f}%")
@@ -948,6 +1041,12 @@ def plot_noise_robustness(model, model_type, X_true_np, Y_test_phys,
                  f'Baseline (zero noise) MAPE = {baseline_mape:.2f}%',
                  fontsize=10, fontweight='bold')
     out = os.path.join(plot_dir, f"{model_type}_noise_robustness.png")
+    # — CSV: MAPE vs noise level per parameter
+    nr_df = pd.DataFrame({'sigma_rel': noise_levels})
+    for name in targets:
+        nr_df[f'{name}_mean_mape'] = mape_vs_noise[name]
+        nr_df[f'{name}_std_mape']  = mape_std_noise[name]
+    csv_save(nr_df, out)
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[interp] Noise robustness → '{out}'")
     return mape_vs_noise

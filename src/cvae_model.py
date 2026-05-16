@@ -29,6 +29,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, Subset
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score
+from csv_utils import csv_save
 warnings.filterwarnings("ignore")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -398,6 +399,12 @@ def evaluate_cvae(model, loader, y_scalers, log_idx, device, split_name='Test',
             ax2.set_xlabel('True', fontsize=8); ax2.set_ylabel('Pred − True', fontsize=8)
         plt.suptitle(f'CVAE — Parity & Residual Plots [{split_name}]', fontsize=11)
         out = os.path.join(plot_dir, f"cvae_parity_{split_name.lower()}.png")
+        # — CSV export
+        rec = {'sample_idx': np.arange(len(yt))}
+        for k, name in enumerate(TARGET_COLS):
+            rec[f'{name}_true'] = yt[:, k]
+            rec[f'{name}_pred'] = yp[:, k]
+        csv_save(rec, out)
         plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
         print(f"[cvae] Parity plots → '{out}'")
 
@@ -477,6 +484,16 @@ def plot_training_curves(history, plot_dir):
     axes[4].set_title('σ over Training'); axes[4].legend()
 
     out = os.path.join(plot_dir, "cvae_v5_training_curves.png")
+    # — CSV export
+    hist_df = pd.DataFrame({'epoch': list(ep)})
+    for k in ['total', 'recon', 'kl', 'phys', 'passiv']:
+        hist_df[f'train_{k}'] = history[f'train_{k}']
+    hist_df['val_total']      = history['val_total']
+    hist_df['val_smape_obs']  = history['val_smape_obs']
+    hist_df['val_smape_all']  = history['val_smape_all']
+    hist_df['sigma_ld']       = history['sigma_ld']
+    hist_df['sigma_obs_mean'] = history['sigma_obs_mean']
+    csv_save(hist_df, out)
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[cvae] Training curves → '{out}'")
 
@@ -502,6 +519,13 @@ def plot_decoder_validation(model, loader, device, plot_dir, n_samples=3):
             if col == 0: ax.set_ylabel('S-param', fontsize=7)
             if row == 0 and col == 0: ax.legend(fontsize=7)
     out = os.path.join(plot_dir, "cvae_v5_decoder_validation.png")
+    # — CSV export: one sub-CSV per sample
+    for row in range(n_samples):
+        rec = {'freq_GHz': fq}
+        for _, (title, sl) in enumerate(panels):
+            rec[f'{title.replace(" ","_")}_true']   = Xt[row, sl]
+            rec[f'{title.replace(" ","_")}_decoded'] = Xd[row, sl]
+        csv_save(rec, out, suffix=f'__sample{row+1}')
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[cvae] Decoder validation → '{out}'")
 
@@ -536,9 +560,13 @@ def posterior_uncertainty_plot(sigma_all, plot_dir, seed=42):
     ax2.legend(fontsize=9)
     plt.suptitle('CVAE v5 — Posterior Uncertainty (UQ)', fontsize=11)
     out = os.path.join(plot_dir, "cvae_v5_posterior_uncertainty.png")
+    # — CSV export: per-sample sigma for every parameter
+    sigma_df = pd.DataFrame(sigma_all, columns=TARGET_COLS)
+    sigma_df['ratio_Ldv_over_obs'] = (sigma_all[:, LDV_IDX] /
+                                       (sigma_all[:, OBS_IDX].mean(axis=1) + 1e-8))
+    csv_save(sigma_df, out)
     plt.tight_layout(); plt.savefig(out, dpi=150, bbox_inches='tight'); plt.close()
     print(f"[cvae] Posterior UQ plot → '{out}'")
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Top-level runner
 # ─────────────────────────────────────────────────────────────────────────────

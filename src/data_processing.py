@@ -37,6 +37,7 @@ import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from scipy.stats import pearsonr
+from csv_utils import csv_save
 
 warnings.filterwarnings("ignore")
 
@@ -173,6 +174,8 @@ def _plot_scree(pca_full, n_kept: int, plot_dir: str, n_show: int = 80):
         fontsize=11, fontweight='bold')
     out = os.path.join(plot_dir, 'pca_scree_plot.png')
     plt.tight_layout()
+    # — CSV export
+    csv_save({'PC': xs, 'explained_var_pct': indiv, 'cumulative_pct': cum}, out)
     plt.savefig(out, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"[data] Scree plot → '{out}'")
@@ -214,6 +217,8 @@ def plot_extended_correlation(proc_dir: str = "data/processed",
     plt.tight_layout()
 
     out = os.path.join(plot_dir, f"pca_correlation_heatmap_{n_ext}pc.png")
+    # — CSV export (correlation matrix as a table: rows=PCs, cols=targets)
+    csv_save(pc_tgt.reset_index().rename(columns={'index': 'PC'}), out)
     plt.savefig(out, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"[data] Extended ({n_ext}-PC) correlation heatmap → '{out}'")
@@ -433,10 +438,11 @@ def plot_pca_target_correlation(proc_dir: str  = "data/processed",
     plt.tight_layout()
 
     out = os.path.join(plot_dir, "pca_correlation_heatmap.png")
+    # — CSV export
+    csv_save(pc_tgt.reset_index().rename(columns={'index': 'PC'}), out)
     plt.savefig(out, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"[data] Correlation heatmap saved → '{out}'")
-
     # — Console summary
     print("\n── Maximum Linear Correlation per Target ────────────────────────")
     print(f"  {'Target':>6s} | {'Best PC':>8s} | {'Max |r|':>8s} | {'Status':>12s}")
