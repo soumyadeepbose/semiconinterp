@@ -1,5 +1,6 @@
 .venv/
 uv.lock
+model_exp.excalidraw
 ignored/
 __pycache__/
 .git/

@@ -17,6 +17,7 @@ uv.lock
 data/matrix.npy
 35semicon_v2.pdf
 data/raw/data.npz
+model_exp.excalidraw
 
 # --- OS & IDE ---
 .DS_Store
