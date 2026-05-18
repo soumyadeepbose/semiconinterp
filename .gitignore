@@ -11,9 +11,7 @@ __pycache__/
 *.so
 
 # --- Tools/Locks ---
-# Some prefer to keep uv.lock in git, but we definitely want it out of AI context
-# If you want to keep it in Git, move 'uv.lock' to the .geminiignore instead.
-uv.lock
+# Some prefer to keep uv.lock in git, but we definitely want it out of AI context.
 data/matrix.npy
 35semicon_v2.pdf
 data/raw/data.npz
